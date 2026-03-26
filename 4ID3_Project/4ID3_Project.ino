@@ -1,8 +1,11 @@
 #include "4ID3_Project.h"
 
-const int Fan_Pin = 12;
-const int LED_Pin = 13;
-int ledsp;
+const int LED1_Pin = 13;
+const int LED2_Pin = 15;
+const int Servo_Pin = 12;
+
+int ledsp = 100;
+int tempsp = 25;
 
 void callback(char* topic, byte* payload, unsigned int length) {
   String msg = "";
@@ -21,109 +24,143 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.print("Updated LED threshold to: ");
     Serial.println(ledsp);
   }
+  if (String(topic) == "4ID3_Group555/TEMP") {
+    tempsp = msg.toInt();
+    Serial.print("Updated temp threshold to: ");
+    Serial.println(tempsp);
+  }
 }
 
 void setup() {
-  //Start the serial monitor at 115200 baud
-  Serial.begin(115200); 
+  Serial.begin(115200);
 
-
-  //Create a sensor object that is passed into the getSensor method of the dht class
-  //Only the dht sensor requires this
   sensor_t sensor;
-  dht.temperature().getSensor(&sensor);
-  dht.humidity().getSensor(&sensor);
+  dht1.temperature().getSensor(&sensor);
+  dht1.humidity().getSensor(&sensor);
+  dht2.temperature().getSensor(&sensor);
+  dht2.humidity().getSensor(&sensor);
 
-  pinMode(Fan_Pin, OUTPUT);
-  pinMode(LED_Pin, OUTPUT);
-  //Run the begin()method on each sensor to start communication
-  dht.begin();
-  
-  BH1750.begin(BH1750_TO_GROUND);   
+  pinMode(LED1_Pin, OUTPUT);
+  pinMode(LED2_Pin, OUTPUT);
 
-  //Start the WiFi driver and tell it to connect to your local network
-  //WiFi.mode(WIFI_STA);
+  dht1.begin();
+  dht2.begin();
+  BH1750.begin(BH1750_TO_GROUND);
+
+  myServo.attach(Servo_Pin);
+  myServo.write(90);   // center at startup
+
   WiFi.begin(ssid, pass);
 
-  //While it is connecting, print a '.' to the serial monitor every 500 ms
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 
-  //Once connected, print the local IP address
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
-  //Set the MQTT client to connect to the desired broker
-  client.setServer(brokerAddress, 1883);
+  client.setServer(brokerAddress, addressPort);
   client.setCallback(callback);
 }
 
 void reconnect() {
-
-  //While the client remains unconnected from the MQTT broker, attempt to reconnect every 2 seconds
-  //Also, print diagnostic information
   while (!client.connected()) {
     Serial.print("\nAttempting MQTT connection...");
-  
-    if (client.connect("ESP8266Client")) {
-      Serial.println("Connected to MQTT server");  
+
+    if (client.connect("ESP8266Client_Ricardo")) {
+      Serial.println("Connected to MQTT server");
       client.subscribe("4ID3_Group555/LED");
+      client.subscribe("4ID3_Group555/TEMP");
     } else {
       Serial.print("\nFailed to connect to MQTT server, rc = ");
-      Serial.print(client.state());
+      Serial.println(client.state());
       delay(2000);
     }
   }
 }
+
 void loop() {
-  
-   //Polling the DHT and BMP sensor using events
-   sensors_event_t dhtTempEvent, dhtHumEvent, bmpEvent;
-   dht.temperature().getEvent(&dhtTempEvent);
-   dht.humidity().getEvent(&dhtHumEvent);
-   
-   //Polling the BH sensor
-   BH1750.start();
-   float lux=BH1750.getLux(); 
+  sensors_event_t dht1TempEvent, dht1HumEvent;
+  sensors_event_t dht2TempEvent, dht2HumEvent;
 
-   //Printing sensor readings to serial monitor
-   Serial.println("\n-");
-   (!isnan(dhtTempEvent.temperature)) ? Serial.println("Temperature: " + String(dhtTempEvent.temperature) + " degC") : Serial.println("Temperature Sensor Disconnected");
-    if(dhtTempEvent.temperature >= 27){
-      digitalWrite(Fan_Pin,HIGH);
-    } else if ((dhtTempEvent.temperature <= 24)){
-      digitalWrite(Fan_Pin,LOW);
+  dht1.temperature().getEvent(&dht1TempEvent);
+  dht1.humidity().getEvent(&dht1HumEvent);
+
+  dht2.temperature().getEvent(&dht2TempEvent);
+  dht2.humidity().getEvent(&dht2HumEvent);
+
+  BH1750.start();
+  float lux = BH1750.getLux();
+
+  Serial.println("\n--------------------");
+
+  (!isnan(dht1TempEvent.temperature)) ? Serial.println("Room 1 Temperature: " + String(dht1TempEvent.temperature) + " degC") : Serial.println("Room 1 Temperature Sensor Disconnected");
+  (!isnan(dht1HumEvent.relative_humidity)) ? Serial.println("Room 1 Humidity: " + String(dht1HumEvent.relative_humidity) + " %") : Serial.println("Room 1 Humidity Sensor Disconnected");
+
+  (!isnan(dht2TempEvent.temperature)) ? Serial.println("Room 2 Temperature: " + String(dht2TempEvent.temperature) + " degC") : Serial.println("Room 2 Temperature Sensor Disconnected");
+  (!isnan(dht2HumEvent.relative_humidity)) ? Serial.println("Room 2 Humidity: " + String(dht2HumEvent.relative_humidity) + " %") : Serial.println("Room 2 Humidity Sensor Disconnected");
+
+  (!isnan(lux)) ? Serial.println("Light Intensity: " + String(lux) + " lux") : Serial.println("Lux Sensor Disconnected");
+
+  // LED control based on lux and Node-RED threshold
+  if (!isnan(lux)) {
+    if (lux <= ledsp) {
+      digitalWrite(LED1_Pin, HIGH);
+    } else {
+      digitalWrite(LED1_Pin, LOW);
     }
-   (!isnan(dhtHumEvent.relative_humidity)) ? Serial.println("Humidity: " + String(dhtHumEvent.relative_humidity) + " %") : Serial.println("Humidity Sensor Disconnected");
-
-
-   (!isnan(lux)) ? Serial.println("Light Intensity: " + String(lux) + " lux") : Serial.println("Lux Sensor Disconnected");
-    if(lux <= ledsp){
-      digitalWrite(LED_Pin,HIGH);
-    } else if (lux>= ledsp){
-      digitalWrite(LED_Pin,LOW);
+  }
+   if (!isnan(lux)) {
+    if (lux <= ledsp) {
+      digitalWrite(LED2_Pin, HIGH);
+    } else {
+      digitalWrite(LED2_Pin, LOW);
     }
-  client.loop();
-  //If the client disconnects from the MQTT broker, attempt to reconnect
+  }
+
+  // Servo control:
+  // left if temp1 > temp2
+  // right if temp2 > temp1
+  // center if equal
+  if (!isnan(dht1TempEvent.temperature) && !isnan(dht2TempEvent.temperature)) {
+    if (dht1TempEvent.temperature > tempsp && dht2TempEvent.temperature < tempsp) {
+      myServo.write(0);
+      Serial.println("Servo -> LEFT (Room 1 hotter than Room 2)");
+    } else if (dht2TempEvent.temperature > tempsp && dht1TempEvent.temperature < tempsp) {
+      myServo.write(180);
+      Serial.println("Servo -> RIGHT (Room 2 hotter than Room 1)");
+    } else {
+      myServo.write(90);
+      Serial.println("Servo -> CENTER (Room temperatures equal)");
+    }
+  }
+
   if (!client.connected()) {
-    
     reconnect();
   }
-  if(!client.loop())
-    client.connect("ESP8266Client");
-  
-  //Publish the sensor data to the associated topics
-  client.publish("4ID3_Group555/temperature", String(dhtTempEvent.temperature).c_str());
-  delay(100);
-  client.publish("4ID3_Group555/humidity", String(dhtHumEvent.relative_humidity).c_str());
-  delay(100);
- 
+  client.loop();
+
+  // Publish to MQTT
+  client.publish("4ID3_Group555/room1/temperature", String(dht1TempEvent.temperature).c_str());
+  delay(50);
+  client.publish("4ID3_Group555/room1/humidity", String(dht1HumEvent.relative_humidity).c_str());
+  delay(50);
+
+  client.publish("4ID3_Group555/room2/temperature", String(dht2TempEvent.temperature).c_str());
+  delay(50);
+  client.publish("4ID3_Group555/room2/humidity", String(dht2HumEvent.relative_humidity).c_str());
+  delay(50);
+
   client.publish("4ID3_Group555/light", String(lux).c_str());
+
   Serial.println("Published data.");
-  Serial.println(ledsp);  
-   delay(DELAY_BETWEEN_SAMPLES_MS);
+  Serial.print("Current LED threshold: ");
+  Serial.println(ledsp);
+  Serial.print("Current TEMP threshold: ");
+  Serial.println(tempsp);
+
+  delay(DELAY_BETWEEN_SAMPLES_MS);
 }
